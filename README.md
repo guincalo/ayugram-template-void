@@ -1,28 +1,29 @@
 # AyuGram Desktop для Void Linux
 [English](README-en.md)
 
-![AyuGram](https://github.com/AyuGram/AyuGramDesktop/raw/dev/.github/AyuGram.png) ![AyuChan](https://github.com/AyuGram/AyuGramDesktop/raw/dev/.github/AyuChan.png) ![VoidBTW](https://github.com/void-linux/void-packages/blob/master/srcpkgs/void-artwork/files/icons/void-logo-128.png)
+![AyuGram](https://github.com/AyuGram/AyuGramDesktop/raw/dev/.github/AyuGram.png) ![AyuChan](https://github.com/AyuGram/AyuGramDesktop/raw/dev/.github/AyuChan.png) ![VoidBTW](.forgejo/void-logo.png)
 
 Неофициальная сборка мода [AyuGram](https://github.com/AyuGram/AyuGramDesktop) под **Void Linux**.
 
 ## Два способа установки
 
-### Способ 1 — готовый бинарный пакет (только x86_64-glibc)
+### Способ 1 — готовый бинарный пакет
+
+1. Перейди на страницу [Releases](https://codeberg.org/OverLessArtem/ayugram-template-void/releases)
+2. Скачай последний релиз для нужной архитектуры:
+   - **x86_64-glibc** — для большинства систем
+   - **x86_64-musl** — для musl-based Void Linux
+3. Установи пакет:
 
 ```bash
-# Скачиваем последний релиз с https://codeberg.org/OverLessArtem/ayugram-template-void/releases/latest
-# или используем команду ниже (требует установки curl)
-
-# Устанавливаем
-curl -sL https://codeberg.org/OverLessArtem/ayugram-template-void/releases/latest/download/ayugram-desktop-*.xbps | xbps-install -
+cd <директория_с_скачанным_файлом>
+sudo xbps-install --repository=$PWD ayugram-desktop
 ```
-
-Или вручную: скачать `.xbps` файл из Release на странице релизов и установить `xbps-install -p ./файл.xbps`.
 
 ### Способ 2 — собрать самому
 ```bash
 # Клонируем шаблон
-git clone https://github.com/OverLessArtem/ayugram-template-void.git
+git clone https://codeberg.org/OverLessArtem/ayugram-template-void.git
 
 # Клонируем официальный репозиторий void-packages
 git clone https://github.com/void-linux/void-packages.git
