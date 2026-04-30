@@ -1,0 +1,247 @@
+name: Build AyuGram
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'srcpkgs/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build AyuGram x86_64
+    runs-on: void-home-server
+    env:
+      ARCH: x86_64
+      BOOTSTRAP: x86_64
+      TEST: 0
+
+    steps:
+      - name: Configure mirrors
+        run: |
+          mkdir -p /etc/xbps.d && cp /usr/share/xbps.d/*-repository-*.conf /etc/xbps.d/
+          sed -i 's|https://repo-default.voidlinux.org|https://repo-fastly.voidlinux.org|g' /etc/xbps.d/*-repository-*.conf
+          xbps-install -S
+
+      - name: Install dependencies
+        run: |
+          xbps-install -Syu xbps && xbps-install -yu && xbps-install -y nodejs git curl base-devel bash
+
+      - name: Checkout your repo
+        uses: actions/checkout@v6
+        with:
+          path: main-repo
+          persist-credentials: false
+
+      - name: Checkout void-packages
+        run: |
+          git clone --depth=1 https://github.com/void-linux/void-packages.git void-packages
+        working-directory: /workspace/OverLessArtem/ayugram-template-void
+
+      - name: Configure ethereal mode
+        run: |
+          echo -e "XBPS_ALLOW_CHROOT_BREAKOUT=yes\nXBPS_CHROOT_CMD=ethereal\nXBPS_MIRROR=https://repo-fastly.voidlinux.org/current" >> etc/conf
+          ln -s / masterdir
+        working-directory: /workspace/OverLessArtem/ayugram-template-void/void-packages
+
+      - name: Merge templates
+        run: |
+          cp -rv main-repo/srcpkgs/ayugram-desktop void-packages/srcpkgs/
+          PKGVERSION=$(grep '^version=' main-repo/srcpkgs/ayugram-desktop/template | cut -d= -f2 | tr -d '"')
+          echo "pkgversion=$PKGVERSION" >> $FORGEJO_OUTPUT
+        working-directory: /workspace/OverLessArtem/ayugram-template-void
+
+      - name: Build AyuGram
+        run: |
+          /bin/bash ./xbps-src -j$(nproc) pkg ayugram-desktop
+        working-directory: /workspace/OverLessArtem/ayugram-template-void/void-packages
+
+      - name: Sign and Index
+        env:
+          PRIV_KEY: ${{ secrets.PRIV_KEY }}
+        run: |
+          echo "$PRIV_KEY" > private.pem
+          xbps-rindex -a *.xbps
+          xbps-rindex -s --signedby "OverLessArtem <artemover@duck.com>" --privkey private.pem $PWD
+          xbps-rindex -S --privkey private.pem *.xbps
+          rm private.pem
+        working-directory: /workspace/OverLessArtem/ayugram-template-void/void-packages/hostdir/binpkgs
+
+      - name: Upload artifacts
+        uses: https://data.forgejo.org/forgejo/upload-artifact@v4
+        with:
+          name: ayugram-packages
+          path: void-packages/hostdir/binpkgs/*
+          retention-days: 1
+
+  build-musl:
+    name: Build AyuGram x86_64 (Musl)
+    runs-on: void-musl-home-server
+    env:
+      ARCH: x86_64-musl
+      BOOTSTRAP: x86_64-musl
+      TEST: 0
+
+    steps:
+      - name: Configure mirrors
+        run: |
+          mkdir -p /etc/xbps.d && cp /usr/share/xbps.d/*-repository-*.conf /etc/xbps.d/
+          sed -i 's|https://repo-default.voidlinux.org|https://repo-fastly.voidlinux.org|g' /etc/xbps.d/*-repository-*.conf
+          xbps-install -S
+
+      - name: Install dependencies
+        run: |
+          xbps-install -Syu xbps && xbps-install -yu && xbps-install -y nodejs git curl base-devel bash
+
+      - name: Checkout your repo
+        uses: actions/checkout@v6
+        with:
+          path: main-repo
+          persist-credentials: false
+
+      - name: Checkout void-packages
+        run: |
+          git clone --depth=1 https://github.com/void-linux/void-packages.git void-packages
+        working-directory: /workspace/OverLessArtem/ayugram-template-void
+
+      - name: Configure ethereal mode
+        run: |
+          echo -e "XBPS_ALLOW_CHROOT_BREAKOUT=yes\nXBPS_CHROOT_CMD=ethereal\nXBPS_MIRROR=https://repo-fastly.voidlinux.org/current" >> etc/conf
+          ln -s / masterdir
+        working-directory: /workspace/OverLessArtem/ayugram-template-void/void-packages
+
+      - name: Merge templates
+        run: |
+          cp -rv main-repo/srcpkgs/ayugram-desktop void-packages/srcpkgs/
+          PKGVERSION=$(grep '^version=' main-repo/srcpkgs/ayugram-desktop/template | cut -d= -f2 | tr -d '"')
+          echo "pkgversion=$PKGVERSION" >> $FORGEJO_OUTPUT
+        working-directory: /workspace/OverLessArtem/ayugram-template-void
+
+      - name: Build AyuGram
+        run: |
+          /bin/bash ./xbps-src -j$(nproc) pkg ayugram-desktop
+        working-directory: /workspace/OverLessArtem/ayugram-template-void/void-packages
+
+      - name: Sign and Index
+        env:
+          PRIV_KEY: ${{ secrets.PRIV_KEY }}
+        run: |
+          echo "$PRIV_KEY" > private.pem
+          xbps-rindex -a *.xbps
+          xbps-rindex -s --signedby "OverLessArtem <artemover@duck.com>" --privkey private.pem $PWD
+          xbps-rindex -S --privkey private.pem *.xbps
+          rm private.pem
+        working-directory: /workspace/OverLessArtem/ayugram-template-void/void-packages/hostdir/binpkgs
+
+      - name: Upload artifacts
+        uses: https://data.forgejo.org/forgejo/upload-artifact@v4
+        with:
+          name: ayugram-packages-musl
+          path: void-packages/hostdir/binpkgs/*
+          retention-days: 1
+
+  publish-release:
+    name: Publish Release
+    needs: [build, build-musl]
+    runs-on: void-home-server
+    steps:
+      - name: Configure mirrors
+        run: |
+          mkdir -p /etc/xbps.d && cp /usr/share/xbps.d/*-repository-*.conf /etc/xbps.d/
+          sed -i 's|https://repo-default.voidlinux.org|https://repo-fastly.voidlinux.org|g' /etc/xbps.d/*-repository-*.conf
+          xbps-install -S
+
+      - name: Install dependencies
+        run: xbps-install -Syu xbps && xbps-install -yu && xbps-install -y nodejs git curl jq
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Download artifacts
+        uses: https://data.forgejo.org/forgejo/download-artifact@v4
+        with:
+          name: ayugram-packages
+          merge-multiple: true
+
+      - name: Download musl artifacts
+        uses: https://data.forgejo.org/forgejo/download-artifact@v4
+        with:
+          name: ayugram-packages-musl
+          path: musl/
+          merge-multiple: true
+
+      - name: Extract version
+        id: info
+        run: |
+          PKGVERSION=$(grep '^version=' srcpkgs/ayugram-desktop/template | cut -d= -f2 | tr -d '"')
+          echo "pkgversion=$PKGVERSION" >> $FORGEJO_OUTPUT
+          echo "run_number=$FORGEJO_RUN_NUMBER" >> $FORGEJO_OUTPUT
+
+      - name: Upload to Package Registry
+        env:
+          FORGE_USER: ${{ vars.FORGE_USER }}
+          FORGE_TOKEN: ${{ secrets.FORGE_TOKEN }}
+        run: |
+          TAG="${{ steps.info.outputs.pkgversion }}-${{ steps.info.outputs.run_number }}"
+          PACKAGE_BASE_URL="${{ forgejo.server_url }}/api/packages/${{ forgejo.repository_owner }}/generic/ayugram-desktop/${TAG}"
+
+          for file in *; do
+            echo "Uploading $file..."
+            curl --http1.1 --fail-with-body \
+              --user "$FORGE_USER:$FORGE_TOKEN" \
+              --upload-file "$file" \
+              "$PACKAGE_BASE_URL/$file"
+          done
+
+          if [ -d musl ]; then
+            for file in musl/*; do
+              echo "Uploading musl/$file..."
+              curl --http1.1 --fail-with-body \
+                --user "$FORGE_USER:$FORGE_TOKEN" \
+                --upload-file "$file" \
+                "$PACKAGE_BASE_URL/musl/$(basename $file)"
+            done
+          fi
+
+      - name: Create Release
+        env:
+          FORGE_TOKEN: ${{ secrets.FORGE_TOKEN }}
+        run: |
+          TAG="${{ steps.info.outputs.pkgversion }}-${{ steps.info.outputs.run_number }}"
+          PACKAGE_BASE="${{ forgejo.server_url }}/api/packages/${{ forgejo.repository_owner }}/generic/ayugram-desktop/${TAG}"
+
+          body=$(jq -n \
+            --arg tag "$TAG" \
+            --arg name "AyuGram Desktop v${TAG}" \
+            --arg body "## AyuGram Desktop v${TAG}\n\nBuilt on home server by workflow [#${{ forgejo.run_number }}](${{ forgejo.server_url }}/${{ forgejo.repository }}/actions/runs/${{ forgejo.run_number }})" \
+            '{tag_name: $tag, name: $name, body: $body, draft: false, prerelease: false}')
+
+          release_id=$(curl --fail-with-body --header 'Content-Type: application/json' \
+            --header 'accept: application/json' \
+            --header "Authorization: token $FORGE_TOKEN" \
+            --data "$body" \
+            --request POST \
+            "${{ forgejo.server_url }}/api/v1/repos/${{ forgejo.repository }}/releases" | jq -r '.id')
+
+          echo "Release created with ID: $release_id"
+
+          for file in *; do
+            echo "Adding external asset: $file"
+            curl --fail-with-body --header 'accept: application/json' \
+              --header "Authorization: token $FORGE_TOKEN" \
+              -F "external_url=${PACKAGE_BASE}/${file}" \
+              --request POST \
+              "${{ forgejo.server_url }}/api/v1/repos/${{ forgejo.repository }}/releases/${release_id}/assets?name=$(printf '%s' "$file" | jq -sRr @uri)"
+          done
+
+          if [ -d musl ]; then
+            for file in musl/*; do
+              echo "Adding external asset: musl/$(basename $file)"
+              curl --fail-with-body --header 'accept: application/json' \
+                --header "Authorization: token $FORGE_TOKEN" \
+                -F "external_url=${PACKAGE_BASE}/musl/$(basename $file)" \
+                --request POST \
+                "${{ forgejo.server_url }}/api/v1/repos/${{ forgejo.repository }}/releases/${release_id}/assets?name=$(printf 'musl/%s' "$(basename $file)" | jq -sRr @uri)"
+            done
+          fi

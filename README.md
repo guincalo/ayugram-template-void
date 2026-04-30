@@ -7,18 +7,17 @@
 
 ## Два способа установки
 
-### Способ 1 — самый простой (готовый бинарный пакет, только x86_64-glibc)
+### Способ 1 — готовый бинарный пакет (только x86_64-glibc)
 
 ```bash
-# Добавляем наш репозиторий
-echo "repository=https://github.com/OverLessArtem/ayugram-template-void/releases/latest/download" | sudo tee /etc/xbps.d/20-ayugram.conf
+# Скачиваем последний релиз с https://codeberg.org/OverLessArtem/ayugram-template-void/releases/latest
+# или используем команду ниже (требует установки curl)
 
-# Обновляем список пакетов
-sudo xbps-install -S
-
-# Устанавливаем AyuGram
-sudo xbps-install -S ayugram-desktop
+# Устанавливаем
+curl -sL https://codeberg.org/OverLessArtem/ayugram-template-void/releases/latest/download/ayugram-desktop-*.xbps | xbps-install -
 ```
+
+Или вручную: скачать `.xbps` файл из Release на странице релизов и установить `xbps-install -p ./файл.xbps`.
 
 ### Способ 2 — собрать самому
 ```bash
