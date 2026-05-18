@@ -16,6 +16,9 @@ Unofficial build of the [AyuGram](https://github.com/AyuGram/AyuGramDesktop) mod
 
 ```bash
 cd <directory_with_downloaded_file>
+# Generate the repository index (required before installing)
+xbps-rindex -a *.xbps
+# Install the package
 sudo xbps-install --repository=$PWD ayugram-desktop
 ```
 
@@ -25,13 +28,13 @@ sudo xbps-install --repository=$PWD ayugram-desktop
 # Clone the template
 git clone https://codeberg.org/OverLessArtem/ayugram-template-void.git
 
-# Clone official void-packages
+# Clone the official void-packages repository
 git clone https://github.com/void-linux/void-packages.git
 
 # Copy our package sources
 cp -r ayugram-template-void/srcpkgs/* void-packages/srcpkgs/
 
-# Enter directory
+# Enter the directory
 cd void-packages
 
 # Build the package (takes ~10–40 minutes depending on your machine)

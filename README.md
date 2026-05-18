@@ -17,6 +17,9 @@
 
 ```bash
 cd <директория_с_скачанным_файлом>
+# Создаём индекс репозитория (необходимо перед установкой)
+xbps-rindex -a *.xbps
+# Устанавливаем пакет
 sudo xbps-install --repository=$PWD ayugram-desktop
 ```
 
