@@ -31,6 +31,10 @@ changelog="https://github.com/AyuGram/AyuGramDesktop/blob/v${version}/changelog.
 
 do_fetch() {
     git clone --branch v${version} --depth 1 --recurse-submodules https://github.com/AyuGram/AyuGramDesktop.git ${wrksrc}
+    # ponytail: v7.0.9 pins a codegen whose lang-subset scanner only recognizes lng_ keys,
+    # dropping every ayu_ key and failing the build; pin the fixed scanner until a tag carries it
+    git -C ${wrksrc}/Telegram/codegen fetch --depth 1 origin 8845d9d45ac754400e19cc2c706dba70a16ef0d5
+    git -C ${wrksrc}/Telegram/codegen checkout -q FETCH_HEAD
 }
 
 do_extract() {
