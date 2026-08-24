@@ -19,15 +19,22 @@ jobs:
       matrix:
         include:
           - libc: glibc
-            image: ghcr.io/void-linux/void-buildcontainer-glibc
+            image: ghcr.io/void-linux/void-glibc-full
           - libc: musl
-            image: ghcr.io/void-linux/void-buildcontainer-musl
+            image: ghcr.io/void-linux/void-musl-full
     container:
       image: ${{ matrix.image }}
       options: --privileged
     env:
       TEST: 0
     steps:
+      - name: Prepare container
+        run: |
+          mkdir -p /etc/xbps.d && cp /usr/share/xbps.d/*-repository-*.conf /etc/xbps.d/
+          sed -i 's|repo-default|repo-ci|g' /etc/xbps.d/*-repository-*.conf
+          xbps-install -Syu xbps && xbps-install -yu && xbps-install -y sudo bash curl git
+          useradd -G xbuilder -M builder
+
       - name: Checkout template repo
         uses: actions/checkout@v4
         with:
@@ -41,8 +48,8 @@ jobs:
 
       - name: Bootstrap and build
         run: |
-          chown -R void:void .
-          sudo -u void sh -c '
+          chown -R builder:builder .
+          sudo -Eu builder sh -c '
             cd void-packages
             ./xbps-src binary-bootstrap
             ./xbps-src pkg ayugram-desktop
