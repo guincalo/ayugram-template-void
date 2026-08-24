@@ -94,9 +94,12 @@ jobs:
           cd /build/repo
           rm -f *-repodata
           xbps-rindex -a *.xbps
+          # ponytail: rindex only indexes its native arch; second forced pass picks up musl pkgs (XBPS_ARCH skips non-matching as 'unmatched arch')
+          XBPS_ARCH=x86_64-musl xbps-rindex -a *.xbps
           if [ -n "$PRIV_KEY" ]; then
             printf '%s\n' "$PRIV_KEY" > /tmp/priv.pem && chmod 600 /tmp/priv.pem
             xbps-rindex -s --signedby "guincalo/ayugram-template-void" --privkey /tmp/priv.pem "$PWD"
+            XBPS_ARCH=x86_64-musl xbps-rindex -s --signedby "guincalo/ayugram-template-void" --privkey /tmp/priv.pem "$PWD"
             xbps-rindex -S --privkey /tmp/priv.pem "$PWD"/*.xbps
             rm -f /tmp/priv.pem
           else
