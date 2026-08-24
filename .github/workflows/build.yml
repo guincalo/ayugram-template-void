@@ -38,7 +38,6 @@ jobs:
           sed -i 's|repo-default|repo-ci|g' /etc/xbps.d/*-repository-*.conf
           xbps-install -Syu || xbps-install -yu xbps
           xbps-install -y git curl tar
-          ls -la /build/void-packages/xbps-src
           cd void-packages
           common/travis/set_mirror.sh
           printf 'XBPS_ALLOW_CHROOT_BREAKOUT=yes\nXBPS_CHROOT_CMD=ethereal\n' >> etc/conf
@@ -46,9 +45,7 @@ jobs:
           /bin/bash ./xbps-src binary-bootstrap
           ./xbps-src -j$(nproc) -H "$HOME/hostdir" pkg ayugram-desktop
           mkdir -p /build/out
-          cp "$HOME"/hostdir/binpkgs/*.xbps /build/out/ || cp hostdir/binpkgs/*.xbps /build/out/
-          cp "$HOME"/hostdir/binpkgs/*-repodata /build/out/ 2>/dev/null || true
-          cd /build/out && xbps-rindex -a *.xbps
+          cp "$HOME"/hostdir/binpkgs/*.xbps /build/out/
           EOF
 
       - name: Build in Void container (${{ matrix.libc }})
@@ -57,10 +54,6 @@ jobs:
             -e HOME=/root -v "$PWD":/build -w /build \
             ${{ matrix.image }} sh /build/ci-build.sh
 
-      - name: Read version
-        id: ver
-        run: echo "version=$(grep '^version=' srcpkgs/ayugram-desktop/template | cut -d= -f2)" >> "$GITHUB_OUTPUT"
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -68,34 +61,71 @@ jobs:
           path: out/*
           retention-days: 7
 
-  release:
-    name: Publish release
+  publish:
+    name: Publish repo + release
     needs: [build]
     runs-on: ubuntu-latest
+    env:
+      PRIV_KEY: ${{ secrets.PRIV_KEY }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Read version
         id: ver
-        run: echo "version=$(grep '^version=' srcpkgs/ayugram-desktop/template | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=$(grep '^version=' srcpkgs/ayugram-desktop/template | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+          echo "revision=$(grep '^revision=' srcpkgs/ayugram-desktop/template | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+          echo "shortsha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: pkgs
+          path: repo
           merge-multiple: true
+
+      - name: Index and sign repository
+        run: |
+          cat > ci-sign.sh <<'EOF'
+          set -ex
+          cd /build/repo
+          rm -f *-repodata
+          xbps-rindex -a *.xbps
+          if [ -n "$PRIV_KEY" ]; then
+            printf '%s\n' "$PRIV_KEY" > /tmp/priv.pem && chmod 600 /tmp/priv.pem
+            xbps-rindex -s --signedby "guincalo/ayugram-template-void" --privkey /tmp/priv.pem "$PWD"
+            xbps-rindex -S --privkey /tmp/priv.pem "$PWD"/*.xbps
+            rm -f /tmp/priv.pem
+          else
+            echo "WARNING: PRIV_KEY not set, publishing unsigned"
+          fi
+          EOF
+          docker run --rm -e PRIV_KEY \
+            -v "$PWD":/build -w /build \
+            ghcr.io/void-linux/void-buildroot-glibc:20240526R1 sh /build/ci-sign.sh
+
+      - name: Push binaries branch (the xbps repo)
+        run: |
+          cd repo
+          ls -la
+          git init -q -b binaries
+          git add -A
+          git -c user.name=update-bot -c user.email=update-bot@users.noreply.github.com \
+            commit -qm "ayugram-desktop ${{ steps.ver.outputs.version }}_r${{ steps.ver.outputs.revision }} (${{ steps.ver.outputs.shortsha }})"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" binaries
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.ver.outputs.version }}-${{ github.run_number }}
-          name: AyuGram Desktop v${{ steps.ver.outputs.version }}
+          tag_name: v${{ steps.ver.outputs.version }}-r${{ steps.ver.outputs.revision }}-${{ steps.ver.outputs.shortsha }}
+          name: ayugram-desktop ${{ steps.ver.outputs.version }}_r${{ steps.ver.outputs.revision }} (${{ steps.ver.outputs.shortsha }})
           body: |
-            Automated build of AyuGram Desktop for Void Linux.
+            Automated Void Linux build of AyuGram Desktop (glibc + musl).
 
-            Install:
+            Use as a repository so `xbps-install -Su` updates it automatically:
             ```
-            xbps-rindex -a ayugram-desktop-*.xbps
-            sudo xbps-install --repository=$PWD ayugram-desktop
+            echo 'repository=https://raw.githubusercontent.com/guincalo/ayugram-template-void/binaries' | sudo tee /etc/xbps.d/20-ayugram.conf
+            sudo xbps-install -S   # accept the fingerprint prompt once
+            sudo xbps-install ayugram-desktop
             ```
-          files: pkgs/*
+          generate_release_notes: true
+          files: repo/*
