@@ -1,0 +1,31 @@
+name: Upstream version check
+
+on:
+  schedule:
+    - cron: '37 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare upstream tag with template
+        run: |
+          UP=$(curl -s https://api.github.com/repos/AyuGram/AyuGramDesktop/releases/latest | jq -r .tag_name | sed 's/^v//')
+          CUR=$(grep '^version=' srcpkgs/ayugram-desktop/template | cut -d= -f2)
+          echo "upstream=$UP template=$CUR"
+          if [ "$UP" = "$CUR" ]; then
+            echo "up to date, nothing to do"
+            exit 0
+          fi
+          sed -i "s/^version=.*/version=$UP/" srcpkgs/ayugram-desktop/template
+          sed -i "s/^revision=.*/revision=1/" srcpkgs/ayugram-desktop/template
+          git config user.name "update-bot"
+          git config user.email "guincalo@users.noreply.github.com"
+          git commit -am "ayugram-desktop: update to $UP"
+          git push

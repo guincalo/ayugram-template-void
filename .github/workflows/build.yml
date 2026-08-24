@@ -1,0 +1,97 @@
+name: Build AyuGram packages
+
+on:
+  push:
+    branches: [main]
+    paths: ['srcpkgs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: x86_64-${{ matrix.libc }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - libc: glibc
+            image: ghcr.io/void-linux/void-buildcontainer-glibc
+          - libc: musl
+            image: ghcr.io/void-linux/void-buildcontainer-musl
+    container:
+      image: ${{ matrix.image }}
+      options: --privileged
+    env:
+      TEST: 0
+    steps:
+      - name: Checkout template repo
+        uses: actions/checkout@v4
+        with:
+          path: main-repo
+
+      - name: Clone void-packages
+        run: git clone --depth=1 https://github.com/void-linux/void-packages.git
+
+      - name: Merge templates
+        run: cp -r main-repo/srcpkgs/ayugram-desktop void-packages/srcpkgs/
+
+      - name: Bootstrap and build
+        run: |
+          chown -R void:void .
+          sudo -u void sh -c '
+            cd void-packages
+            ./xbps-src binary-bootstrap
+            ./xbps-src pkg ayugram-desktop
+          '
+
+      - name: Index repo metadata
+        run: |
+          cd void-packages/hostdir/binpkgs
+          xbps-rindex -a *.xbps
+
+      - name: Read version
+        id: ver
+        run: echo "version=$(grep '^version=' main-repo/srcpkgs/ayugram-desktop/template | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ayugram-x86_64-${{ matrix.libc }}
+          path: void-packages/hostdir/binpkgs/*
+          retention-days: 7
+
+  release:
+    name: Publish release
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        run: echo "version=$(grep '^version=' srcpkgs/ayugram-desktop/template | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: pkgs
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag: v${{ steps.ver.outputs.version }}-${{ github.run_number }}
+          name: AyuGram Desktop v${{ steps.ver.outputs.version }}
+          body: |
+            Automated build of AyuGram Desktop for Void Linux.
+
+            Install:
+            ```
+            xbps-rindex -a ayugram-desktop-*.xbps
+            sudo xbps-install --repository=$PWD ayugram-desktop
+            ```
+          files: pkgs/*
