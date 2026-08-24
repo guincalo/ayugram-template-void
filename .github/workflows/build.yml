@@ -38,8 +38,12 @@ jobs:
           sed -i 's|repo-default|repo-ci|g' /etc/xbps.d/*-repository-*.conf
           xbps-install -Syu || xbps-install -yu xbps
           xbps-install -y git curl tar
+          git config --global --add safe.directory '*'
           cd void-packages
           common/travis/set_mirror.sh
+          # ethereal + chroot breakout: actions containers block user namespaces
+          # (uid_map EPERM) so xbps-src's default bwrap cannot run at all;
+          # disposable privileged container makes this safe.
           printf 'XBPS_ALLOW_CHROOT_BREAKOUT=yes\nXBPS_CHROOT_CMD=ethereal\n' >> etc/conf
           ln -s / masterdir
           /bin/bash ./xbps-src binary-bootstrap
@@ -112,6 +116,12 @@ jobs:
           git -c user.name=update-bot -c user.email=update-bot@users.noreply.github.com \
             commit -qm "ayugram-desktop ${{ steps.ver.outputs.version }}_r${{ steps.ver.outputs.revision }} (${{ steps.ver.outputs.shortsha }})"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" binaries
+
+      - name: Create and push tag
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}-r${{ steps.ver.outputs.revision }}-${{ steps.ver.outputs.shortsha }}"
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "refs/tags/$TAG"
 
       - name: Create release
         uses: softprops/action-gh-release@v2

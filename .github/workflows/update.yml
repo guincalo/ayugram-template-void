@@ -16,8 +16,10 @@ jobs:
 
       - name: Compare upstream tag with template
         run: |
-          UP=$(curl -s https://api.github.com/repos/AyuGram/AyuGramDesktop/releases/latest | jq -r .tag_name | sed 's/^v//')
+          UP=$(curl -sf https://api.github.com/repos/AyuGram/AyuGramDesktop/releases/latest | jq -r '.tag_name | ltrimstr("v")')
+          { [ -n "$UP" ] && [ "$UP" != "null" ]; } || { echo "upstream fetch failed"; exit 1; }
           CUR=$(grep '^version=' srcpkgs/ayugram-desktop/template | cut -d= -f2)
+          [ -n "$CUR" ] || { echo "template version parse failed"; exit 1; }
           echo "upstream=$UP template=$CUR"
           if [ "$UP" = "$CUR" ]; then
             echo "up to date, nothing to do"
@@ -26,6 +28,6 @@ jobs:
           sed -i "s/^version=.*/version=$UP/" srcpkgs/ayugram-desktop/template
           sed -i "s/^revision=.*/revision=1/" srcpkgs/ayugram-desktop/template
           git config user.name "update-bot"
-          git config user.email "guincalo@users.noreply.github.com"
+          git config user.email "305042777+guincalo@users.noreply.github.com"
           git commit -am "ayugram-desktop: update to $UP"
           git push
