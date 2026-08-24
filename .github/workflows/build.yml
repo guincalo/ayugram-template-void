@@ -22,47 +22,37 @@ jobs:
             image: ghcr.io/void-linux/void-glibc-full
           - libc: musl
             image: ghcr.io/void-linux/void-musl-full
-    container:
-      image: ${{ matrix.image }}
-      options: --privileged
-    env:
-      TEST: 0
     steps:
-      - name: Prepare container
-        run: |
-          mkdir -p /etc/xbps.d && cp /usr/share/xbps.d/*-repository-*.conf /etc/xbps.d/
-          sed -i 's|repo-default|repo-ci|g' /etc/xbps.d/*-repository-*.conf
-          xbps-install -Syu xbps && xbps-install -yu && xbps-install -y sudo bash curl git
-          useradd -G xbuilder -M builder
-
-      - name: Checkout template repo
-        uses: actions/checkout@v4
-        with:
-          path: main-repo
+      - uses: actions/checkout@v4
 
       - name: Clone void-packages
         run: git clone --depth=1 https://github.com/void-linux/void-packages.git
 
       - name: Merge templates
-        run: cp -r main-repo/srcpkgs/ayugram-desktop void-packages/srcpkgs/
+        run: cp -r srcpkgs/ayugram-desktop void-packages/srcpkgs/
 
-      - name: Bootstrap and build
+      - name: Write build script
         run: |
-          chown -R builder:builder .
-          sudo -Eu builder sh -c '
-            cd void-packages
-            ./xbps-src binary-bootstrap
-            ./xbps-src pkg ayugram-desktop
-          '
+          cat > ci-build.sh <<'EOF'
+          set -e
+          mkdir -p /etc/xbps.d && cp /usr/share/xbps.d/*-repository-*.conf /etc/xbps.d/
+          sed -i 's|repo-default|repo-ci|g' /etc/xbps.d/*-repository-*.conf
+          xbps-install -Syu xbps && xbps-install -yu && xbps-install -y git
+          cd void-packages
+          printf 'XBPS_ALLOW_CHROOT_BREAKOUT=yes\nXBPS_CHROOT_CMD=ethereal\n' >> etc/conf
+          ln -s / masterdir
+          ./xbps-src pkg ayugram-desktop
+          cd hostdir/binpkgs && xbps-rindex -a *.xbps
+          EOF
 
-      - name: Index repo metadata
+      - name: Build in Void container (${{ matrix.libc }})
         run: |
-          cd void-packages/hostdir/binpkgs
-          xbps-rindex -a *.xbps
+          docker run --rm --privileged -v "$PWD":/build -w /build \
+            ${{ matrix.image }} sh ci-build.sh
 
       - name: Read version
         id: ver
-        run: echo "version=$(grep '^version=' main-repo/srcpkgs/ayugram-desktop/template | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(grep '^version=' srcpkgs/ayugram-desktop/template | cut -d= -f2)" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
