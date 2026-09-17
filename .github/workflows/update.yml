@@ -4,76 +4,107 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 6 * * *'   # daily at 06:00 UTC
-  push:
-    branches: [main]
 
 permissions:
   contents: write
+
+concurrency:
+  group: ayugram-version-update
+  cancel-in-progress: false
 
 jobs:
   bump:
     runs-on: ubuntu-latest
     steps:
+      - name: Require bot credentials
+        env:
+          BOT_PAT: ${{ secrets.BOT_PAT }}
+        run: |
+          if [ -z "$BOT_PAT" ]; then
+            echo "::error::Set BOT_PAT with Contents: read/write. GITHUB_TOKEN pushes cannot trigger build.yml."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.BOT_PAT }}
 
-      - name: Check Void Qt6 version
-        id: qt6
+      - name: Fetch current Qt6 and upstream versions
+        id: versions
+        shell: bash
         run: |
-          # Fetch the current qt6-core version from Void's repodata
-          curl -sL https://repo-default.voidlinux.org/current/x86_64-repodata | \
-            tar -xJf - --wildcards '*/index.plist' -O 2>/dev/null | \
-            grep -A2 'qt6-core' | grep '<string>' | head -1 | \
-            sed 's/.*<string>//;s/<\/string>//' > /tmp/qt6_version.txt
-          echo "version=$(cat /tmp/qt6_version.txt)" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          curl --fail --silent --show-error --location --retry 3 \
+            https://repo-default.voidlinux.org/current/x86_64-repodata \
+            -o "$work/repodata.zst"
+          # XBPS repodata is a zstd-compressed tar containing multiple plists.
+          zstd -dc "$work/repodata.zst" > "$work/repodata.tar"
+          QT=$(python3 - "$work/repodata.tar" <<'PY'
+          import plistlib
+          import re
+          import sys
+          import tarfile
 
-      - name: Compare Qt6 version with last build
-        id: qt6_check
+          with tarfile.open(sys.argv[1], "r:") as archive:
+              with archive.extractfile("index.plist") as index:
+                  pkgver = plistlib.load(index)["qt6-core"]["pkgver"]
+          match = re.fullmatch(r"qt6-core-([0-9]+(?:[.][0-9]+)+)_[0-9]+", pkgver)
+          if not match:
+              sys.exit(f"Invalid qt6-core pkgver: {pkgver!r}")
+          print(match[1])
+          PY
+          )
+          UP=$(curl --fail --silent --show-error --location --retry 3 \
+            https://api.github.com/repos/AyuGram/AyuGramDesktop/releases/latest | \
+            jq -er '.tag_name | ltrimstr("v")')
+          [[ "$UP" =~ ^[0-9]+([.][0-9]+)+$ ]] || { echo "::error::Invalid upstream version: $UP"; exit 1; }
+          printf 'qt6=%s\nupstream=%s\n' "$QT" "$UP" >> "$GITHUB_OUTPUT"
+
+      - name: Update marker and template
+        id: update
+        env:
+          QT: ${{ steps.versions.outputs.qt6 }}
+          UP: ${{ steps.versions.outputs.upstream }}
+        shell: bash
         run: |
-          LAST=$(git show HEAD:srcpkgs/ayugram-desktop/qt6_build_version 2>/dev/null || echo "none")
-          CURRENT="${{ steps.qt6.outputs.version }}"
-          if [ "$LAST" != "$CURRENT" ]; then
-            echo "changed=true" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          template=srcpkgs/ayugram-desktop/template
+          marker=srcpkgs/ayugram-desktop/qt6_build_version
+          [[ "$QT" =~ ^[0-9]+([.][0-9]+)+$ && "$UP" =~ ^[0-9]+([.][0-9]+)+$ ]] || { echo "::error::Missing or invalid version input"; exit 1; }
+          CUR=$(sed -n 's/^version=//p' "$template")
+          REV=$(sed -n 's/^revision=//p' "$template")
+          [[ "$CUR" =~ ^[0-9]+([.][0-9]+)+$ && "$REV" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid template version/revision"; exit 1; }
+          LAST=""
+          if [ -f "$marker" ]; then LAST=$(< "$marker"); fi
+          changed=false
+          if [ "$LAST" != "$QT" ]; then
+            printf '%s\n' "$QT" > "$marker"
+            REV=$((REV + 1))
+            sed -i "s/^revision=.*/revision=$REV/" "$template"
+            changed=true
+          fi
+          # An upstream release takes precedence over a simultaneous Qt rebuild.
+          if [ "$CUR" != "$UP" ]; then
+            sed -i "s/^version=.*/version=$UP/;s/^revision=.*/revision=1/" "$template"
+            REV=1
+            changed=true
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          if [ "$changed" = true ]; then
+            echo "Updating AyuGram $UP revision $REV (Qt6 $QT; previous marker '$LAST')"
           else
-            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "Nothing to do: AyuGram $CUR revision $REV, Qt6 $QT marker matches."
           fi
 
-      - name: Compare upstream tag with template
-        id: upstream
+      - name: Commit and push changes
+        if: steps.update.outputs.changed == 'true'
         run: |
-          UP=$(curl -sf https://api.github.com/repos/AyuGram/AyuGramDesktop/releases/latest | jq -r '.tag_name | ltrimstr("v")')
-          { [ -n "$UP" ] && [ "$UP" != "null" ]; } || { echo "upstream fetch failed"; exit 1; }
-          CUR=$(grep '^version=' srcpkgs/ayugram-desktop/template | cut -d= -f2)
-          [ -n "$CUR" ] || { echo "template version parse failed"; exit 1; }
-          echo "upstream=$UP template=$CUR"
-          if [ "$UP" = "$CUR" ]; then
-            echo "up_to_date=true" >> $GITHUB_OUTPUT
-          else
-            echo "up_to_date=false" >> $GITHUB_OUTPUT
-            echo "new_version=$UP" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Bump version for upstream release
-        if: steps.upstream.outputs.up_to_date == 'false'
-        run: |
-          UP="${{ steps.upstream.outputs.new_version }}"
-          sed -i "s/^version=.*/version=$UP/" srcpkgs/ayugram-desktop/template
-          sed -i "s/^revision=.*/revision=1/" srcpkgs/ayugram-desktop/template
-          echo "${{ steps.qt6.outputs.version }}" > srcpkgs/ayugram-desktop/qt6_build_version
+          set -eu
           git config user.name "update-bot"
           git config user.email "305042777+guincalo@users.noreply.github.com"
-          git add srcpkgs/ayugram-desktop/template srcpkgs/ayugram-desktop/qt6_build_version
-          git commit -m "ayugram-desktop: update to $UP (Qt6 ${{ steps.qt6.outputs.version }})"
-          git push
-
-      - name: Bump revision for Qt6 rebuild
-        if: steps.qt6_check.outputs.changed == 'true' && steps.upstream.outputs.up_to_date == 'true'
-        run: |
-          REV=$(grep '^revision=' srcpkgs/ayugram-desktop/template | cut -d= -f2)
-          NEW_REV=$((REV + 1))
-          sed -i "s/^revision=.*/revision=$NEW_REV/" srcpkgs/ayugram-desktop/template
-          echo "${{ steps.qt6.outputs.version }}" > srcpkgs/ayugram-desktop/qt6_build_version
-          git config user.name "update-bot"
-          git config user.email "305042777+guincalo@users.noreply.github.com"
-          git add srcpkgs/ayugram-desktop/template srcpkgs/ayugram-desktop/qt6_build_version
-          git commit -m "ayugram-desktop: rebuild for Qt6 ${{ steps.qt6.outputs.version }} (revision $NEW_REV)"
-          git push
+          git add -A
+          git commit -m "ayugram-desktop: synchronize upstream and Qt6 build versions"
+          git push origin HEAD:main

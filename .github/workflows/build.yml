@@ -31,6 +31,31 @@ jobs:
       - name: Merge templates
         run: cp -r srcpkgs/ayugram-desktop void-packages/srcpkgs/
 
+      - name: Install Qt6 build guard
+        run: |
+          # Run after dependency installation, in the same xbps-src invocation.
+          cat > void-packages/common/hooks/pre-configure/00-ayugram-qt6-guard.sh <<'EOF'
+          hook() {
+              [ "$pkgname" = ayugram-desktop ] || return 0
+              local expected actual
+              expected=$(<"$XBPS_SRCPKGDIR/ayugram-desktop/qt6_build_version") ||
+                  msg_error "Cannot read qt6_build_version; refusing to build.\n"
+              [[ "$expected" =~ ^[0-9]+([.][0-9]+)+$ ]] ||
+                  msg_error "Invalid or empty qt6_build_version; refusing to build.\n"
+              # masterdir -> / with ethereal: this is the container's /var/db/xbps.
+              # No -R: query the installed package, not the repository candidate.
+              actual=$(xbps-query -r "$XBPS_MASTERDIR" -p pkgver qt6-core) ||
+                  msg_error "qt6-core is not installed in the build root; refusing to build.\n"
+              [[ "$actual" =~ ^qt6-core-([0-9]+([.][0-9]+)+)_[0-9]+$ ]] ||
+                  msg_error "Invalid installed qt6-core pkgver: $actual\n"
+              actual=${actual#qt6-core-}
+              actual=${actual%_*}
+              [ "$actual" = "$expected" ] ||
+                  msg_error "Qt6 mismatch: marker=$expected, installed=$actual (root=$XBPS_MASTERDIR). Run update.yml after mirrors synchronize; refusing to build/publish.\n"
+              msg_normal "Qt6 guard passed: marker=$expected, installed=$actual\n"
+          }
+          EOF
+
       - name: Write build script
         run: |
           cat > ci-build.sh <<'EOF'
