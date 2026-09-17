@@ -122,22 +122,42 @@ jobs:
           # Never trace commands that expand the private signing key.
           set -eu
           [ -n "$PRIV_KEY" ] || { echo 'ERROR: PRIV_KEY is missing; refusing unsigned publication.' >&2; exit 1; }
+          # /tmp/priv.pem is chmod 600 and removed by the trap; do not umask 077
+          # globally or the .sig2 files stay root-only and the runner cannot git add them.
           trap 'rm -f /tmp/priv.pem' EXIT
-          umask 077
           cd /build/repo
           rm -f *-repodata
-          xbps-rindex -a *.xbps
-          XBPS_ARCH=x86_64-musl xbps-rindex -a *.xbps
-          if [ -n "$PRIV_KEY" ]; then
-            printf '%s\n' "$PRIV_KEY" > /tmp/priv.pem && chmod 600 /tmp/priv.pem
-            xbps-rindex -s --signedby "guincalo/ayugram-template-void" --privkey /tmp/priv.pem "$PWD"
-            XBPS_ARCH=x86_64-musl xbps-rindex -s --signedby "guincalo/ayugram-template-void" --privkey /tmp/priv.pem "$PWD"
-            xbps-rindex -S --privkey /tmp/priv.pem "$PWD"/*.xbps
-            rm -f /tmp/priv.pem
-          else
-            echo "ERROR: PRIV_KEY is missing; refusing unsigned publication." >&2
-            exit 1
-          fi
+
+          # Index each architecture separately. xbps-rindex silently skips any
+          # package whose arch does not match the target repository, so one pass
+          # over *.xbps drops the musl binary and leaves musl users unable to
+          # xbps-install from this repo.
+          set -- *.x86_64.xbps
+          [ "$#" -eq 1 ] || { echo "ERROR: expected one glibc package, got: $*" >&2; exit 1; }
+          set -- *.x86_64-musl.xbps
+          [ "$#" -eq 1 ] || { echo "ERROR: expected one musl package, got: $*" >&2; exit 1; }
+
+          xbps-rindex -a *.x86_64.xbps
+          XBPS_ARCH=x86_64-musl xbps-rindex -a *.x86_64-musl.xbps
+          [ -s x86_64-repodata ] || { echo "ERROR: x86_64-repodata missing" >&2; exit 1; }
+          [ -s x86_64-musl-repodata ] || { echo "ERROR: x86_64-musl-repodata missing" >&2; exit 1; }
+
+          printf '%s\n' "$PRIV_KEY" > /tmp/priv.pem && chmod 600 /tmp/priv.pem
+          xbps-rindex -s --signedby "guincalo/ayugram-template-void" --privkey /tmp/priv.pem "$PWD"
+          XBPS_ARCH=x86_64-musl xbps-rindex -s --signedby "guincalo/ayugram-template-void" --privkey /tmp/priv.pem "$PWD"
+          xbps-rindex -S --privkey /tmp/priv.pem "$PWD"/*.xbps
+          rm -f /tmp/priv.pem
+
+          # Fail closed: every published package needs a detached signature, and
+          # each architecture index must be signed and resolve the package.
+          for f in *.xbps; do
+            [ -s "$f.sig2" ] || { echo "ERROR: $f has no detached signature" >&2; exit 1; }
+          done
+          for arch in x86_64 x86_64-musl; do
+            found=$(XBPS_ARCH=$arch xbps-query -R --repository="$PWD" -p pkgver ayugram-desktop) \
+              || { echo "ERROR: ayugram-desktop not resolvable from signed $arch index" >&2; exit 1; }
+            echo "published $arch: $found"
+          done
           EOF
           docker run --rm -e PRIV_KEY \
             -v "$PWD":/build -w /build \
