@@ -18,8 +18,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { libc: glibc, image: ghcr.io/void-linux/void-buildroot-glibc:20240526R1 }
-          - { libc: musl,  image: ghcr.io/void-linux/void-buildroot-musl:20240526R1 }
+          - libc: glibc
+            image: ghcr.io/void-linux/void-buildroot-glibc:20240526R1
+          - libc: musl
+            image: ghcr.io/void-linux/void-buildroot-musl:20240526R1
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +51,7 @@ jobs:
           cp "$HOME"/hostdir/binpkgs/*.xbps /build/out/
           EOF
 
-      - name: Build in Void container (${{ matrix.libc }})
+      - name: Build in Void container
         run: |
           docker run --rm --privileged \
             -e HOME=/root -v "$PWD":/build -w /build \
@@ -106,7 +108,7 @@ jobs:
             -v "$PWD":/build -w /build \
             ghcr.io/void-linux/void-buildroot-glibc:20240526R1 sh /build/ci-sign.sh
 
-      - name: Push binaries branch (the xbps repo)
+      - name: Push binaries branch
         run: |
           cd repo
           ls -la
@@ -131,3 +133,10 @@ jobs:
             Automated Void Linux build of AyuGram Desktop (glibc + musl).
 
             Use as a repository so `xbps-install -Su` updates it automatically:
+            ```
+            echo 'repository=https://raw.githubusercontent.com/guincalo/ayugram-template-void/binaries' | sudo tee /etc/xbps.d/20-ayugram.conf
+            sudo xbps-install -S
+            sudo xbps-install ayugram-desktop
+            ```
+          generate_release_notes: true
+          files: repo/*
