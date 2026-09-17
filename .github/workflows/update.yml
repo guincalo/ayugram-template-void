@@ -25,6 +25,7 @@ jobs:
             grep -A2 'qt6-core' | grep '<string>' | head -1 | \
             sed 's/.*<string>//;s/<\/string>//' > /tmp/qt6_version.txt
           echo "version=$(cat /tmp/qt6_version.txt)" >> $GITHUB_OUTPUT
+
       - name: Compare Qt6 version with last build
         id: qt6_check
         run: |
@@ -35,7 +36,9 @@ jobs:
           else
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
+
       - name: Compare upstream tag with template
+        id: upstream
         run: |
           UP=$(curl -sf https://api.github.com/repos/AyuGram/AyuGramDesktop/releases/latest | jq -r '.tag_name | ltrimstr("v")')
           { [ -n "$UP" ] && [ "$UP" != "null" ]; } || { echo "upstream fetch failed"; exit 1; }
@@ -43,12 +46,34 @@ jobs:
           [ -n "$CUR" ] || { echo "template version parse failed"; exit 1; }
           echo "upstream=$UP template=$CUR"
           if [ "$UP" = "$CUR" ]; then
-            echo "up to date, nothing to do"
-            exit 0
+            echo "up_to_date=true" >> $GITHUB_OUTPUT
+          else
+            echo "up_to_date=false" >> $GITHUB_OUTPUT
+            echo "new_version=$UP" >> $GITHUB_OUTPUT
           fi
+
+      - name: Bump version for upstream release
+        if: steps.upstream.outputs.up_to_date == 'false'
+        run: |
+          UP="${{ steps.upstream.outputs.new_version }}"
           sed -i "s/^version=.*/version=$UP/" srcpkgs/ayugram-desktop/template
           sed -i "s/^revision=.*/revision=1/" srcpkgs/ayugram-desktop/template
+          echo "${{ steps.qt6.outputs.version }}" > srcpkgs/ayugram-desktop/qt6_build_version
           git config user.name "update-bot"
           git config user.email "305042777+guincalo@users.noreply.github.com"
-          git commit -am "ayugram-desktop: update to $UP"
+          git add srcpkgs/ayugram-desktop/template srcpkgs/ayugram-desktop/qt6_build_version
+          git commit -m "ayugram-desktop: update to $UP (Qt6 ${{ steps.qt6.outputs.version }})"
+          git push
+
+      - name: Bump revision for Qt6 rebuild
+        if: steps.qt6_check.outputs.changed == 'true' && steps.upstream.outputs.up_to_date == 'true'
+        run: |
+          REV=$(grep '^revision=' srcpkgs/ayugram-desktop/template | cut -d= -f2)
+          NEW_REV=$((REV + 1))
+          sed -i "s/^revision=.*/revision=$NEW_REV/" srcpkgs/ayugram-desktop/template
+          echo "${{ steps.qt6.outputs.version }}" > srcpkgs/ayugram-desktop/qt6_build_version
+          git config user.name "update-bot"
+          git config user.email "305042777+guincalo@users.noreply.github.com"
+          git add srcpkgs/ayugram-desktop/template srcpkgs/ayugram-desktop/qt6_build_version
+          git commit -m "ayugram-desktop: rebuild for Qt6 ${{ steps.qt6.outputs.version }} (revision $NEW_REV)"
           git push
