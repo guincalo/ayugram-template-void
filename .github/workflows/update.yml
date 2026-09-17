@@ -1,9 +1,11 @@
 name: Upstream version check
 
 on:
-  schedule:
-    - cron: '37 4 * * *'
   workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'   # daily at 06:00 UTC
+  push:
+    branches: [main]
 
 permissions:
   contents: write
