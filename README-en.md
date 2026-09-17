@@ -6,11 +6,11 @@
 
 Unofficial [AyuGram Desktop](https://github.com/AyuGram/AyuGramDesktop) packages for Void Linux.
 
-AyuGram itself is developed by the [AyuGram team](https://github.com/AyuGram/AyuGramDesktop). This repo only does the packaging: a Void template and automatic .xbps builds for x86_64 (glibc and musl).
+AyuGram itself is developed by the [AyuGram team](https://github.com/AyuGram/AyuGramDesktop). This repo only does the packaging: a Void template and automatic `.xbps` builds for x86_64 (glibc and musl).
 
 ## Install
 
-Packages are published on the binaries branch as a signed xbps repository.
+Packages are published on the `binaries` branch as a signed xbps repository.
 
 ```bash
 echo 'repository=https://raw.githubusercontent.com/guincalo/ayugram-template-void/binaries' | sudo tee /etc/xbps.d/20-ayugram.conf
@@ -22,9 +22,9 @@ After that, `sudo xbps-install -Su` keeps AyuGram up to date with the rest of th
 
 ## Install manually
 
-1. Grab the .xbps from the [Releases](https://github.com/guincalo/ayugram-template-void/releases) page:
-   - x86_64-glibc — regular Void
-   - x86_64-musl — Void on musl
+1. Grab the `.xbps` from the [Releases](https://github.com/guincalo/ayugram-template-void/releases) page:
+   - `x86_64-glibc` — regular Void
+   - `x86_64-musl` — Void on musl
 2. Install it:
 
 ```bash
@@ -33,11 +33,11 @@ xbps-rindex -a *.xbps
 sudo xbps-install --repository="$PWD" ayugram-desktop
 ```
 
-To update later, download the new file into the same folder and repeat with -u.
+To update later, download the new file into the same folder and repeat with `-u`.
 
 ## Build it yourself
 
-You need Void Linux and base-devel.
+You need Void Linux and `base-devel`.
 
 ```bash
 git clone https://github.com/guincalo/ayugram-template-void.git
@@ -51,7 +51,7 @@ sudo xbps-install -R hostdir/binpkgs ayugram-desktop
 
 ## How updates work
 
-- update.yml runs once a day. New AyuGram release — it bumps the template version. Qt6 updated in Void — it bumps the revision. Either way a build starts afterwards.
-- build.yml builds the glibc and musl packages, signs them, and publishes them to binaries and Releases. If the Qt6 version in the build environment doesn't match what the template expects, the build stops.
+- `update.yml` runs once a day. New AyuGram release — it bumps the template version. Qt6 updated in Void — it bumps the revision. Either way a build starts afterwards.
+- `build.yml` builds the glibc and musl packages, signs them, and publishes them to `binaries` and Releases. If the Qt6 version in the build environment doesn't match what the template expects, the build stops.
 
 A new AyuGram release is not a guarantee that it builds or that everything works.
