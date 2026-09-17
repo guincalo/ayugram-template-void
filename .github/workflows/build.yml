@@ -93,13 +93,14 @@ jobs:
     name: Publish repo + release
     needs: [build]
     runs-on: ubuntu-latest
-    # A tag whose commit touches .github/workflows/* needs workflows: write
-    # or git-receive-pack rejects it, even with contents: write.
+    # GITHUB_TOKEN cannot push a tag whose commit touches .github/workflows/*
+    # (git-receive-pack refuses without a workflows scope that GITHUB_TOKEN
+    # cannot be granted), so the tag and release go out under BOT_PAT.
     permissions:
       contents: write
-      workflows: write
     env:
       PRIV_KEY: ${{ secrets.PRIV_KEY }}
+      BOT_PAT: ${{ secrets.BOT_PAT }}
     steps:
       - uses: actions/checkout@v4
 
@@ -163,6 +164,13 @@ jobs:
             -v "$PWD":/build -w /build \
             ghcr.io/void-linux/void-buildroot-glibc:20240526R1 sh /build/ci-sign.sh
 
+      - name: Require bot credentials
+        run: |
+          if [ -z "$BOT_PAT" ]; then
+            echo "::error::BOT_PAT is required to tag and release commits that change workflows."
+            exit 1
+          fi
+
       - name: Push binaries branch
         run: |
           cd repo
@@ -177,10 +185,12 @@ jobs:
         run: |
           TAG="v${{ steps.ver.outputs.version }}-r${{ steps.ver.outputs.revision }}-${{ steps.ver.outputs.shortsha }}"
           git tag -f "$TAG" "$GITHUB_SHA"
-          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "refs/tags/$TAG"
+          git push -qf "https://x-access-token:${{ secrets.BOT_PAT }}@github.com/${{ github.repository }}.git" "refs/tags/$TAG"
 
       - name: Create release
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.BOT_PAT }}
         with:
           tag_name: v${{ steps.ver.outputs.version }}-r${{ steps.ver.outputs.revision }}-${{ steps.ver.outputs.shortsha }}
           name: ayugram-desktop ${{ steps.ver.outputs.version }}_r${{ steps.ver.outputs.revision }} (${{ steps.ver.outputs.shortsha }})
