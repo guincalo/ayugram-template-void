@@ -114,7 +114,11 @@ jobs:
       - name: Index and sign repository
         run: |
           cat > ci-sign.sh <<'EOF'
-          set -ex
+          # Never trace commands that expand the private signing key.
+          set -eu
+          [ -n "$PRIV_KEY" ] || { echo 'ERROR: PRIV_KEY is missing; refusing unsigned publication.' >&2; exit 1; }
+          trap 'rm -f /tmp/priv.pem' EXIT
+          umask 077
           cd /build/repo
           rm -f *-repodata
           xbps-rindex -a *.xbps
@@ -126,7 +130,8 @@ jobs:
             xbps-rindex -S --privkey /tmp/priv.pem "$PWD"/*.xbps
             rm -f /tmp/priv.pem
           else
-            echo "WARNING: PRIV_KEY not set, publishing unsigned"
+            echo "ERROR: PRIV_KEY is missing; refusing unsigned publication." >&2
+            exit 1
           fi
           EOF
           docker run --rm -e PRIV_KEY \
