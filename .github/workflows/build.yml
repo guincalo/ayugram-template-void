@@ -93,6 +93,11 @@ jobs:
     name: Publish repo + release
     needs: [build]
     runs-on: ubuntu-latest
+    # A tag whose commit touches .github/workflows/* needs workflows: write
+    # or git-receive-pack rejects it, even with contents: write.
+    permissions:
+      contents: write
+      workflows: write
     env:
       PRIV_KEY: ${{ secrets.PRIV_KEY }}
     steps:
