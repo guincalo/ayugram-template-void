@@ -16,6 +16,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check Void Qt6 version
+        id: qt6
+        run: |
+          # Fetch the current qt6-core version from Void's repodata
+          curl -sL https://repo-default.voidlinux.org/current/x86_64-repodata | \
+            tar -xJf - --wildcards '*/index.plist' -O 2>/dev/null | \
+            grep -A2 'qt6-core' | grep '<string>' | head -1 | \
+            sed 's/.*<string>//;s/<\/string>//' > /tmp/qt6_version.txt
+          echo "version=$(cat /tmp/qt6_version.txt)" >> $GITHUB_OUTPUT
+      - name: Compare Qt6 version with last build
+        id: qt6_check
+        run: |
+          LAST=$(git show HEAD:srcpkgs/ayugram-desktop/qt6_build_version 2>/dev/null || echo "none")
+          CURRENT="${{ steps.qt6.outputs.version }}"
+          if [ "$LAST" != "$CURRENT" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
       - name: Compare upstream tag with template
         run: |
           UP=$(curl -sf https://api.github.com/repos/AyuGram/AyuGramDesktop/releases/latest | jq -r '.tag_name | ltrimstr("v")')
