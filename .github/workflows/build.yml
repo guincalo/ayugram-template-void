@@ -119,7 +119,13 @@ jobs:
 
       - name: Index and sign repository
         run: |
-          cat > ci-sign.sh <<'EOF'
+          # xbps-rindex silently skips any package whose arch does not match the
+          # toolchain's native arch. XBPS_ARCH would override that, but it is
+          # ignored inside these containers, so each architecture is indexed by
+          # the buildroot image that targets it natively: the musl image's xbps
+          # is a musl build and derives x86_64-musl with no env var at all. This
+          # is also how Void itself produces its musl repositories.
+          cat > ci-sign-glibc.sh <<'EOF'
           # Never trace commands that expand the private signing key.
           set -eu
           [ -n "$PRIV_KEY" ] || { echo 'ERROR: PRIV_KEY is missing; refusing unsigned publication.' >&2; exit 1; }
@@ -127,42 +133,50 @@ jobs:
           # globally or the .sig2 files stay root-only and the runner cannot git add them.
           trap 'rm -f /tmp/priv.pem' EXIT
           cd /build/repo
-          rm -f *-repodata
-
-          # Index each architecture separately. xbps-rindex silently skips any
-          # package whose arch does not match the target repository, so one pass
-          # over *.xbps drops the musl binary and leaves musl users unable to
-          # xbps-install from this repo.
+          rm -f *-repodata *.sig2
           set -- *.x86_64.xbps
           [ "$#" -eq 1 ] || { echo "ERROR: expected one glibc package, got: $*" >&2; exit 1; }
-          set -- *.x86_64-musl.xbps
-          [ "$#" -eq 1 ] || { echo "ERROR: expected one musl package, got: $*" >&2; exit 1; }
-
-          xbps-rindex -a *.x86_64.xbps
-          XBPS_ARCH=x86_64-musl xbps-rindex -a *.x86_64-musl.xbps
+          xbps-rindex -a "$1"
           [ -s x86_64-repodata ] || { echo "ERROR: x86_64-repodata missing" >&2; exit 1; }
-          [ -s x86_64-musl-repodata ] || { echo "ERROR: x86_64-musl-repodata missing" >&2; exit 1; }
-
           printf '%s\n' "$PRIV_KEY" > /tmp/priv.pem && chmod 600 /tmp/priv.pem
           xbps-rindex -s --signedby "guincalo/ayugram-template-void" --privkey /tmp/priv.pem "$PWD"
-          XBPS_ARCH=x86_64-musl xbps-rindex -s --signedby "guincalo/ayugram-template-void" --privkey /tmp/priv.pem "$PWD"
+          # Sign both binary archives here; the operation is arch independent.
           xbps-rindex -S --privkey /tmp/priv.pem "$PWD"/*.xbps
           rm -f /tmp/priv.pem
-
-          # Fail closed: every published package needs a detached signature, and
-          # each architecture index must be signed and resolve the package.
-          for f in *.xbps; do
-            [ -s "$f.sig2" ] || { echo "ERROR: $f has no detached signature" >&2; exit 1; }
-          done
-          for arch in x86_64 x86_64-musl; do
-            found=$(XBPS_ARCH=$arch xbps-query -R --repository="$PWD" -p pkgver ayugram-desktop) \
-              || { echo "ERROR: ayugram-desktop not resolvable from signed $arch index" >&2; exit 1; }
-            echo "published $arch: $found"
-          done
+          found=$(xbps-query -R --repository="$PWD" -p pkgver ayugram-desktop) \
+            || { echo "ERROR: ayugram-desktop not resolvable from signed x86_64 index" >&2; exit 1; }
+          echo "published x86_64: $found"
+          EOF
+          cat > ci-sign-musl.sh <<'EOF'
+          set -eu
+          [ -n "$PRIV_KEY" ] || { echo 'ERROR: PRIV_KEY is missing; refusing unsigned publication.' >&2; exit 1; }
+          trap 'rm -f /tmp/priv.pem' EXIT
+          cd /build/repo
+          set -- *.x86_64-musl.xbps
+          [ "$#" -eq 1 ] || { echo "ERROR: expected one musl package, got: $*" >&2; exit 1; }
+          xbps-rindex -a "$1"
+          [ -s x86_64-musl-repodata ] || { echo "ERROR: x86_64-musl-repodata missing" >&2; exit 1; }
+          printf '%s\n' "$PRIV_KEY" > /tmp/priv.pem && chmod 600 /tmp/priv.pem
+          xbps-rindex -s --signedby "guincalo/ayugram-template-void" --privkey /tmp/priv.pem "$PWD"
+          rm -f /tmp/priv.pem
+          found=$(xbps-query -R --repository="$PWD" -p pkgver ayugram-desktop) \
+            || { echo "ERROR: ayugram-desktop not resolvable from signed x86_64-musl index" >&2; exit 1; }
+          echo "published x86_64-musl: $found"
           EOF
           docker run --rm -e PRIV_KEY \
             -v "$PWD":/build -w /build \
-            ghcr.io/void-linux/void-buildroot-glibc:20240526R1 sh /build/ci-sign.sh
+            ghcr.io/void-linux/void-buildroot-glibc:20240526R1 sh /build/ci-sign-glibc.sh
+          docker run --rm -e PRIV_KEY \
+            -v "$PWD":/build -w /build \
+            ghcr.io/void-linux/void-buildroot-musl:20240526R1 sh /build/ci-sign-musl.sh
+          # Fail closed on the runner side too: both indexes and every detached
+          # signature must exist before anything is published.
+          cd repo
+          for f in *.xbps; do
+            [ -s "$f.sig2" ] || { echo "ERROR: $f has no detached signature" >&2; exit 1; }
+          done
+          [ -s x86_64-repodata ] && [ -s x86_64-musl-repodata ] \
+            || { echo "ERROR: both x86_64-repodata and x86_64-musl-repodata are required" >&2; exit 1; }
 
       - name: Require bot credentials
         run: |

@@ -143,6 +143,23 @@ class Workflows(unittest.TestCase):
                             pkgname="ayugram-desktop", XBPS_MASTERDIR="/",
                             XBPS_SRCPKGDIR=str(self.pkg.parent)).returncode, 0)
 
+    def test_publish_indexes_each_arch_in_its_own_container(self):
+        # xbps-rindex skips packages whose arch does not match the toolchain's
+        # native arch, and XBPS_ARCH is ignored inside the runner containers, so
+        # each architecture must be indexed by the buildroot image targeting it.
+        build = yaml.safe_load((ROOT / ".github/workflows/build.yml").read_text())
+        run = next(s["run"] for s in build["jobs"]["publish"]["steps"]
+                   if s.get("name") == "Index and sign repository")
+        self.assertNotIn("XBPS_ARCH=", run)
+        self.assertIn("void-buildroot-glibc:20240526R1 sh /build/ci-sign-glibc.sh", run)
+        self.assertIn("void-buildroot-musl:20240526R1 sh /build/ci-sign-musl.sh", run)
+        self.assertIn('xbps-rindex -a "$1"', run)
+        # Fail closed: nothing is published unless both indexes are signed and
+        # every binary archive has a detached signature.
+        self.assertIn("not resolvable from signed x86_64 index", run)
+        self.assertIn("not resolvable from signed x86_64-musl index", run)
+        self.assertIn("both x86_64-repodata and x86_64-musl-repodata are required", run)
+
     def test_workflow_wiring(self):
         triggers = UPDATE.get("on", UPDATE.get(True))  # PyYAML uses YAML 1.1 booleans.
         self.assertEqual(set(triggers), {"schedule", "workflow_dispatch"})
